@@ -89,8 +89,8 @@ const MainLayout = ({ children }) => {
           </div>
         )}
         
-        {/* CABEÇALHO DESKTOP OU KIOSK MODE */}
-        {(window.innerWidth >= 1024 || isKioskMode) && (
+        {/* CABEÇALHO DESKTOP */}
+        {(window.innerWidth >= 1024 && !isKioskMode) && (
           <h1 className="no-print" style={{ fontSize: '2rem', marginBottom: '40px', color: 'var(--text-main)' }}>{getTitle()}</h1>
         )}
         

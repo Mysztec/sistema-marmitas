@@ -554,19 +554,19 @@ export default function Admin() {
             </h3>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
+<div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--table-header)', textAlign: 'left', borderBottom: '2px solid var(--border-color)' }}>
                   <th style={{ padding: '16px', color: 'var(--text-main)', fontSize: '1rem' }}>Funcionário</th>
                   <th style={{ padding: '16px', color: 'var(--text-main)', fontSize: '1rem' }}>Status</th>
-                  <th className="no-print" style={{ padding: '16px', color: 'var(--text-main)', fontSize: '1rem' }}>Cobrança?</th>
                 </tr>
               </thead>
               <tbody>
                 {reservas.length === 0 ? (
                   <tr>
-                    <td colSpan="3" style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    {/* Mudamos o colSpan de 3 para 2 */}
+                    <td colSpan="2" style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>
                       Nenhuma reserva nesta data.
                     </td>
                   </tr>
@@ -598,14 +598,6 @@ export default function Admin() {
                             }}>
                               ⏳ Pendente
                             </span>
-                        }
-                      </td>
-                      <td className="no-print" style={{ padding: '16px' }}>
-                        {(!r.retirou && dataFiltro < new Date().toISOString().split('T')[0]) 
-                          ? <span style={{ color: 'var(--danger-text)', fontWeight: 'bold', fontSize: '0.9rem' }}>
-                              Sim (Descontar)
-                            </span> 
-                          : '-'
                         }
                       </td>
                     </tr>
