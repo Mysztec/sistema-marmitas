@@ -11,13 +11,16 @@ export default function Admin() {
   const [dataFiltro, setDataFiltro] = useState(new Date().toISOString().split('T')[0]);
 
   // ==========================================
-  // ESTADOS: FECHAMENTO MENSAL
+  // ESTADOS: FECHAMENTO MENSAL E CONFIGURAÇÕES
   // ==========================================
   const [mesFechamento, setMesFechamento] = useState(() => {
     const hoje = new Date();
     return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [precos, setPrecos] = useState({ valor_retirada: 0, valor_falta: 0 });
+  
+  // NOME DO ESTADO ATUALIZADO PARA ENGLOBAR O HORÁRIO
+  const [configuracoes, setConfiguracoes] = useState({ valor_retirada: 0, valor_falta: 0, horario_limite: '09:30' });
+  
   const [dadosFechamento, setDadosFechamento] = useState([]);
   const [tipoFechamento, setTipoFechamento] = useState('geral'); // 'geral' ou 'detalhado'
   const [filtroFuncionario, setFiltroFuncionario] = useState('');
@@ -78,6 +81,7 @@ export default function Admin() {
     toast.success(statusAtual ? "Funcionário desativado!" : "Funcionário reativado!");
   };
 
+  // 1. Função que realmente vai no banco apagar o funcionário
   const confirmarExclusao = async (id) => {
     const { error } = await supabase
       .from('funcionarios')
@@ -92,6 +96,7 @@ export default function Admin() {
     }
   };
 
+  // 2. Nova função de Excluir que chama o Popup Customizado (sem window.confirm)
   const excluirFuncionario = (id, nomeFuncionario) => {
     toast((t) => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', alignItems: 'center', textAlign: 'center' }}>
@@ -105,7 +110,7 @@ export default function Admin() {
           <button 
             onClick={() => {
               confirmarExclusao(id);
-              toast.dismiss(t.id);
+              toast.dismiss(t.id); // Fecha o popup
             }}
             style={{ 
               padding: '8px 16px', 
@@ -120,7 +125,7 @@ export default function Admin() {
             Sim, Excluir
           </button>
           <button 
-            onClick={() => toast.dismiss(t.id)} 
+            onClick={() => toast.dismiss(t.id)} // Só fecha o popup sem fazer nada
             style={{ 
               padding: '8px 16px', 
               backgroundColor: 'var(--bg-body)', 
@@ -135,16 +140,21 @@ export default function Admin() {
           </button>
         </div>
       </div>
-    ), { duration: Infinity, style: { minWidth: '320px', backgroundColor: 'var(--bg-card)' } });
+    ), { 
+      duration: Infinity, // Faz o popup ficar na tela até a pessoa clicar em algum botão
+      style: { minWidth: '320px', backgroundColor: 'var(--bg-card)' } 
+    });
   };
 
-  // ==========================================
-  // FUNÇÕES DE RELATÓRIO DIÁRIO
-  // ==========================================
   const carregarRelatorio = async () => {
     const { data, error } = await supabase
       .from('reservas')
-      .select(`id, data_reserva, retirou, funcionarios ( nome )`)
+      .select(`
+        id,
+        data_reserva,
+        retirou,
+        funcionarios ( nome )
+      `)
       .eq('data_reserva', dataFiltro);
 
     if (error) {
@@ -154,30 +164,38 @@ export default function Admin() {
     }
   };
 
+  const totalMarmitas = reservas.length;
+
   const enviarWhatsApp = () => {
-    if (reservas.length === 0) {
+    if (totalMarmitas === 0) {
       toast.error("Não há reservas para enviar nesta data.");
       return;
     }
     const dataFormatada = dataFiltro.split('-').reverse().join('/');
-    const texto = `Olá! Segue o fechamento de marmitas para hoje (${dataFormatada}):\n\n*Total a preparar/entregar:* ${reservas.length} marmitas.\n\nObrigado!`;
+    const texto = `Olá! Segue o fechamento de marmitas para hoje (${dataFormatada}):\n\n*Total a preparar/entregar:* ${totalMarmitas} marmitas.\n\nObrigado!`;
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   };
 
-  const imprimirRelatorio = () => { window.print(); };
+  const imprimirRelatorio = () => { 
+    window.print(); 
+  };
 
   // ==========================================
-  // FUNÇÕES: FECHAMENTO MENSAL
+  // FUNÇÕES: FECHAMENTO E CONFIGURAÇÕES
   // ==========================================
   
   const gerarFechamento = async () => {
-    // 1. Busca os preços mais recentes do banco ANTES de calcular
+    // 1. Busca os preços E O HORÁRIO mais recentes do banco ANTES de calcular
     const { data: config } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
-    let precosAtualizados = precos;
+    let configAtual = configuracoes;
     
     if (config) {
-      precosAtualizados = { valor_retirada: config.valor_retirada, valor_falta: config.valor_falta };
-      setPrecos(precosAtualizados); // Atualiza os inputs na tela
+      configAtual = { 
+        valor_retirada: config.valor_retirada, 
+        valor_falta: config.valor_falta,
+        horario_limite: config.horario_limite || '09:30' // Puxa do banco
+      };
+      setConfiguracoes(configAtual); // Atualiza os inputs na tela
     }
 
     // 2. Define as datas do mês selecionado
@@ -196,17 +214,17 @@ export default function Admin() {
 
     if (error || !data) return;
 
-    // 4. Faz os cálculos usando os preços garantidos
+    // 4. Faz os cálculos usando as configurações garantidas
     const dadosProcessados = data.map(r => {
       let valorCobrado = 0;
       let statusDesc = '';
 
       if (r.retirou) {
-        valorCobrado = Number(precosAtualizados.valor_retirada);
+        valorCobrado = Number(configAtual.valor_retirada);
         statusDesc = 'Retirou';
       } else {
         if (r.data_reserva <= hojeIso) {
-          valorCobrado = Number(precosAtualizados.valor_falta);
+          valorCobrado = Number(configAtual.valor_falta);
           statusDesc = 'Faltou';
         } else {
           valorCobrado = 0;
@@ -219,20 +237,21 @@ export default function Admin() {
     setDadosFechamento(dadosProcessados);
   };
 
-  const salvarPrecos = async () => {
+  const salvarConfiguracoes = async () => {
     const { error } = await supabase
       .from('configuracoes')
       .update({ 
-        valor_retirada: precos.valor_retirada, 
-        valor_falta: precos.valor_falta 
+        valor_retirada: configuracoes.valor_retirada, 
+        valor_falta: configuracoes.valor_falta,
+        horario_limite: configuracoes.horario_limite // Salva a hora no banco
       })
       .eq('id', 1);
 
     if (error) {
-      toast.error("Erro ao salvar preços.");
+      toast.error("Erro ao salvar configurações.");
     } else {
-      toast.success("Preços atualizados com sucesso!");
-      gerarFechamento(); // Recalcula a tabela automaticamente com os novos preços!
+      toast.success("Configurações atualizadas com sucesso!");
+      gerarFechamento(); // Recalcula a tabela automaticamente com os novos valores!
     }
   };
 
@@ -250,7 +269,7 @@ export default function Admin() {
 
   const listaGeral = Object.values(resumoGeral).sort((a, b) => a.nome.localeCompare(b.nome));
 
-  // Filtro inteligente para o relatório detalhado
+  // Filtro inteligente para o relatório detalhado em texto
   const dadosDetalhadosFiltrados = filtroFuncionario 
     ? dadosFechamento.filter(r => 
         r.funcionarios?.nome?.toLowerCase().includes(filtroFuncionario.toLowerCase())
@@ -268,7 +287,7 @@ export default function Admin() {
         padding: '12px 24px', 
         border: 'none', 
         borderRadius: '12px', 
-        cursor: 'pointer', 
+        cursor: 'pointer',
         fontSize: '1rem', 
         fontWeight: abaAtiva === value ? 'bold' : 'normal',
         backgroundColor: abaAtiva === value ? 'var(--accent-main)' : 'var(--bg-card)',
@@ -293,15 +312,13 @@ export default function Admin() {
       `}</style>
 
       {/* NAVEGAÇÃO ENTRE ABAS */}
-      <div className="no-print" style={{ marginBottom: '30px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      <div className="no-print" style={{ marginBottom: '30px', display: 'flex', gap: '10px' }}>
         <TabBtn label="Gerenciar Funcionários" icon="👥" value="funcionarios" />
         <TabBtn label="Relatório de Reservas" icon="📊" value="relatorios" />
-        <TabBtn label="Fechamento Mensal" icon="💰" value="fechamento" />
+        <TabBtn label="Configurações & Fechamento" icon="⚙️" value="fechamento" />
       </div>
 
-      {/* ========================================================== */}
       {/* ABA 1: FUNCIONÁRIOS */}
-      {/* ========================================================== */}
       {abaAtiva === 'funcionarios' && (
         <div className="print-card" style={{ 
           backgroundColor: 'var(--bg-card)', 
@@ -421,6 +438,7 @@ export default function Admin() {
                       >
                         {f.ativo ? 'Desativar' : 'Reativar'}
                       </button>
+                      
                       <button 
                         onClick={() => excluirFuncionario(f.id, f.nome)} 
                         style={{ 
@@ -431,7 +449,7 @@ export default function Admin() {
                           borderRadius: '24px', 
                           cursor: 'pointer', 
                           fontWeight: 'bold' 
-                        }} 
+                        }}
                         title="Excluir permanentemente"
                       >
                         🗑️ Excluir
@@ -445,9 +463,7 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ========================================================== */}
-      {/* ABA 2: RELATÓRIOS DIÁRIOS */}
-      {/* ========================================================== */}
+      {/* ABA 2: RELATÓRIOS */}
       {abaAtiva === 'relatorios' && (
         <div className="print-card" style={{ 
           backgroundColor: 'var(--bg-card)', 
@@ -463,9 +479,8 @@ export default function Admin() {
             paddingBottom: '15px', 
             marginBottom: '25px' 
           }}>
-            <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.5rem' }}>
-              Histórico
-            </h2>
+            <h2 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1.5rem' }}>Histórico</h2>
+            
             <div className="no-print" style={{ display: 'flex', gap: '10px' }}>
               <button 
                 onClick={imprimirRelatorio} 
@@ -484,6 +499,7 @@ export default function Admin() {
               >
                 🖨️ PDF
               </button>
+              
               <button 
                 onClick={enviarWhatsApp} 
                 style={{ 
@@ -505,9 +521,7 @@ export default function Admin() {
           </div>
           
           <div className="no-print" style={{ marginTop: '20px', marginBottom: '30px' }}>
-            <label style={{ fontWeight: 'bold', marginRight: '10px', color: 'var(--accent-main)' }}>
-              Filtrar Data:
-            </label>
+            <label style={{ fontWeight: 'bold', marginRight: '10px', color: 'var(--accent-main)' }}>Filtrar Data:</label>
             <input 
               type="date" 
               value={dataFiltro} 
@@ -536,7 +550,7 @@ export default function Admin() {
               Período: <strong>{dataFiltro.split('-').reverse().join('/')}</strong>
             </p>
             <h3 style={{ margin: '10px 0 0 0', color: 'var(--text-main)', fontSize: '2rem' }}>
-              Total: <strong style={{color: 'var(--accent-main)'}}>{reservas.length}</strong> marmitas
+              Total: <strong style={{color: 'var(--accent-main)'}}>{totalMarmitas}</strong> marmitas
             </h3>
           </div>
 
@@ -604,26 +618,13 @@ export default function Admin() {
       )}
 
       {/* ========================================================== */}
-      {/* ABA 3: FECHAMENTO MENSAL */}
+      {/* ABA 3: CONFIGURAÇÕES E FECHAMENTO MENSAL */}
       {/* ========================================================== */}
       {abaAtiva === 'fechamento' && (
-        <div className="print-card" style={{ 
-          backgroundColor: 'var(--bg-card)', 
-          padding: '30px', 
-          borderRadius: '16px', 
-          boxShadow: '0 4px 15px rgba(0,0,0,0.05)' 
-        }}>
+        <div className="print-card" style={{ backgroundColor: 'var(--bg-card)', padding: '30px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
           
-          <div className="no-print" style={{ 
-            marginBottom: '40px', 
-            padding: '20px', 
-            backgroundColor: 'var(--bg-body)', 
-            borderRadius: '12px', 
-            border: '1px solid var(--border-color)' 
-          }}>
-            <h3 style={{ color: 'var(--text-main)', marginTop: 0, marginBottom: '20px' }}>
-              ⚙️ Tabela de Preços Atuais
-            </h3>
+          <div className="no-print" style={{ marginBottom: '40px', padding: '20px', backgroundColor: 'var(--bg-body)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ color: 'var(--text-main)', marginTop: 0, marginBottom: '20px' }}>⚙️ Configurações do Sistema</h3>
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>
@@ -632,17 +633,9 @@ export default function Admin() {
                 <input 
                   type="number" 
                   step="0.01" 
-                  value={precos.valor_retirada} 
-                  onChange={(e) => setPrecos({...precos, valor_retirada: e.target.value})} 
-                  style={{ 
-                    padding: '12px', 
-                    borderRadius: '8px', 
-                    border: '2px solid var(--border-color)', 
-                    backgroundColor: 'var(--input-bg)', 
-                    color: 'var(--text-main)', 
-                    width: '200px', 
-                    outline: 'none' 
-                  }} 
+                  value={configuracoes.valor_retirada} 
+                  onChange={(e) => setConfiguracoes({...configuracoes, valor_retirada: e.target.value})} 
+                  style={{ padding: '12px', borderRadius: '8px', border: '2px solid var(--border-color)', backgroundColor: 'var(--input-bg)', color: 'var(--text-main)', width: '200px', outline: 'none' }} 
                 />
               </div>
               <div>
@@ -652,85 +645,50 @@ export default function Admin() {
                 <input 
                   type="number" 
                   step="0.01" 
-                  value={precos.valor_falta} 
-                  onChange={(e) => setPrecos({...precos, valor_falta: e.target.value})} 
-                  style={{ 
-                    padding: '12px', 
-                    borderRadius: '8px', 
-                    border: '2px solid #fca5a5', 
-                    backgroundColor: 'var(--input-bg)', 
-                    color: 'var(--text-main)', 
-                    width: '200px', 
-                    outline: 'none' 
-                  }} 
+                  value={configuracoes.valor_falta} 
+                  onChange={(e) => setConfiguracoes({...configuracoes, valor_falta: e.target.value})} 
+                  style={{ padding: '12px', borderRadius: '8px', border: '2px solid #fca5a5', backgroundColor: 'var(--input-bg)', color: 'var(--text-main)', width: '200px', outline: 'none' }} 
                 />
               </div>
+              
+              {/* CAMPO NOVO DO HORÁRIO LIMITE */}
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--accent-main)', fontWeight: 'bold' }}>
+                  Horário Limite (Tablet)
+                </label>
+                <input 
+                  type="time" 
+                  value={configuracoes.horario_limite} 
+                  onChange={(e) => setConfiguracoes({...configuracoes, horario_limite: e.target.value})} 
+                  style={{ padding: '12px', borderRadius: '8px', border: '2px solid var(--border-color)', backgroundColor: 'var(--input-bg)', color: 'var(--text-main)', width: '150px', outline: 'none' }} 
+                />
+              </div>
+
               <button 
-                onClick={salvarPrecos} 
-                style={{ 
-                  padding: '12px 24px', 
-                  backgroundColor: 'var(--accent-main)', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: '8px', 
-                  cursor: 'pointer', 
-                  fontWeight: 'bold', 
-                  height: '45px', 
-                  transition: 'background-color 0.2s' 
-                }}
+                onClick={salvarConfiguracoes} 
+                style={{ padding: '12px 24px', backgroundColor: 'var(--accent-main)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', height: '45px', transition: 'background-color 0.2s' }}
               >
-                Salvar Preços
+                Salvar Configurações
               </button>
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '15px', fontStyle: 'italic' }}>
-              * Os valores salvos aqui serão usados para calcular a cobrança no relatório abaixo.
+              * Os valores e o horário salvos aqui entram em vigor na mesma hora em todo o sistema.
             </p>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border-color)', paddingBottom: '15px', marginBottom: '25px', flexWrap: 'wrap', gap: '15px' }}>
-            <h2 style={{ margin: 0, color: 'var(--text-main)' }}>
-              Fechamento Financeiro
-            </h2>
+            <h2 style={{ margin: 0, color: 'var(--text-main)' }}>Fechamento Financeiro</h2>
+            
             <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
               <input 
                 type="month" 
                 value={mesFechamento} 
                 onChange={(e) => setMesFechamento(e.target.value)} 
-                style={{ 
-                  padding: '10px 15px', 
-                  borderRadius: '8px', 
-                  border: '2px solid var(--border-color)', 
-                  backgroundColor: 'var(--input-bg)', 
-                  color: 'var(--text-main)', 
-                  outline: 'none' 
-                }} 
+                style={{ padding: '10px 15px', borderRadius: '8px', border: '2px solid var(--border-color)', backgroundColor: 'var(--input-bg)', color: 'var(--text-main)', outline: 'none' }} 
               />
-              {/* Botão mantido como opcional para forçar atualização se necessário */}
-              <button 
-                onClick={gerarFechamento} 
-                style={{ 
-                  padding: '10px 20px', 
-                  backgroundColor: 'var(--accent-main)', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: '8px', 
-                  cursor: 'pointer', 
-                  fontWeight: 'bold' 
-                }}
-              >
-                🔄 Atualizar
-              </button>
               <button 
                 onClick={() => window.print()} 
-                style={{ 
-                  padding: '10px 15px', 
-                  backgroundColor: 'var(--bg-body)', 
-                  color: 'var(--text-main)', 
-                  border: '1px solid var(--border-color)', 
-                  borderRadius: '8px', 
-                  cursor: 'pointer', 
-                  fontWeight: 'bold' 
-                }}
+                style={{ padding: '10px 15px', backgroundColor: 'var(--bg-body)', color: 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 🖨️ PDF
               </button>
@@ -741,54 +699,28 @@ export default function Admin() {
              <div style={{ display: 'flex', gap: '10px' }}>
                <button 
                  onClick={() => setTipoFechamento('geral')} 
-                 style={{ 
-                   padding: '8px 16px', 
-                   borderRadius: '8px', 
-                   border: 'none', 
-                   cursor: 'pointer', 
-                   fontWeight: 'bold', 
-                   backgroundColor: tipoFechamento === 'geral' ? 'var(--text-main)' : 'var(--bg-body)', 
-                   color: tipoFechamento === 'geral' ? 'var(--bg-card)' : 'var(--text-main)' 
-                 }}
+                 style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: tipoFechamento === 'geral' ? 'var(--text-main)' : 'var(--bg-body)', color: tipoFechamento === 'geral' ? 'var(--bg-card)' : 'var(--text-main)' }}
                >
                  📋 Resumo por Funcionário
                </button>
                <button 
                  onClick={() => setTipoFechamento('detalhado')} 
-                 style={{ 
-                   padding: '8px 16px', 
-                   borderRadius: '8px', 
-                   border: 'none', 
-                   cursor: 'pointer', 
-                   fontWeight: 'bold', 
-                   backgroundColor: tipoFechamento === 'detalhado' ? 'var(--text-main)' : 'var(--bg-body)', 
-                   color: tipoFechamento === 'detalhado' ? 'var(--bg-card)' : 'var(--text-main)' 
-                 }}
+                 style={{ padding: '8px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold', backgroundColor: tipoFechamento === 'detalhado' ? 'var(--text-main)' : 'var(--bg-body)', color: tipoFechamento === 'detalhado' ? 'var(--bg-card)' : 'var(--text-main)' }}
                >
                  🔍 Extrato Detalhado Diário
                </button>
              </div>
              
-             {/* A BARRA DE PESQUISA EM TEXTO APARECE AQUI */}
+             {/* BARRA DE PESQUISA */}
              {tipoFechamento === 'detalhado' && (
                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                 <label style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>
-                   Pesquisar Funcionário:
-                 </label>
+                 <label style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>Pesquisar Funcionário:</label>
                  <input 
                    type="text"
                    placeholder="Digite o nome..."
                    value={filtroFuncionario} 
                    onChange={(e) => setFiltroFuncionario(e.target.value)}
-                   style={{ 
-                     padding: '8px 15px', 
-                     borderRadius: '8px', 
-                     border: '2px solid var(--border-color)', 
-                     backgroundColor: 'var(--input-bg)', 
-                     color: 'var(--text-main)', 
-                     outline: 'none', 
-                     fontWeight: 'normal' 
-                   }}
+                   style={{ padding: '8px 15px', borderRadius: '8px', border: '2px solid var(--border-color)', backgroundColor: 'var(--input-bg)', color: 'var(--text-main)', outline: 'none', fontWeight: 'normal' }}
                  />
                </div>
              )}
@@ -815,15 +747,9 @@ export default function Admin() {
                   ) : (
                     listaGeral.map((item, index) => (
                       <tr key={index} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '16px', fontWeight: 'bold', color: 'var(--text-main)' }}>
-                          {item.nome}
-                        </td>
-                        <td style={{ padding: '16px', color: 'var(--text-main)' }}>
-                          {item.qtdRetiradas}
-                        </td>
-                        <td style={{ padding: '16px', color: 'var(--danger-text)', fontWeight: 'bold' }}>
-                          {item.qtdFaltas}
-                        </td>
+                        <td style={{ padding: '16px', fontWeight: 'bold', color: 'var(--text-main)' }}>{item.nome}</td>
+                        <td style={{ padding: '16px', color: 'var(--text-main)' }}>{item.qtdRetiradas}</td>
+                        <td style={{ padding: '16px', color: 'var(--danger-text)', fontWeight: 'bold' }}>{item.qtdFaltas}</td>
                         <td style={{ padding: '16px', fontWeight: 'bold', color: 'var(--accent-main)', fontSize: '1.1rem' }}>
                           {formatarMoeda(item.totalPagar)}
                         </td>
